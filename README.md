@@ -9,7 +9,7 @@ A small online seller pastes the conversation. The app extracts the items, quant
 - **Light and dark themes:** starts from the system preference and remembers the choice (localStorage).
 
 
-**Live demo:** coming soon (PayPal **sandbox** only, no real money)  
+**Live demo:** https://chat-to-invoice.vercel.app (PayPal **sandbox** only, no real money)  
 **Demo video:** coming soon on YouTube.
 
 ## Setup
