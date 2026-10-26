@@ -1,0 +1,53 @@
+# Records the end-to-end demo with Playwright (headless Chromium, 1280x800) and saves screenshots.
+import asyncio, glob, os
+from playwright.async_api import async_playwright
+URL = os.environ.get('URL', 'http://localhost:8787/')
+CAP = """(t)=>{let c=document.getElementById('__cap');if(!c){c=document.createElement('div');c.id='__cap';c.style.cssText='position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9999;padding:12px 22px;border-radius:14px;background:rgba(10,11,18,.88);border:1px solid rgba(129,140,248,.35);color:#fff;font:500 17px Inter Variable,Inter,sans-serif;letter-spacing:-.01em;box-shadow:0 20px 60px -10px rgba(0,0,0,.8);backdrop-filter:blur(12px);transition:opacity .35s;max-width:900px;text-align:center';document.body.appendChild(c)}c.style.opacity=0;setTimeout(()=>{c.textContent=t;c.style.opacity=1},250)}"""
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch()
+        ctx = await b.new_context(viewport={'width': 1280, 'height': 800}, record_video_dir='docs/rec', record_video_size={'width': 1280, 'height': 800}, device_scale_factor=1, color_scheme='dark')
+        pg = await ctx.new_page(); w = pg.wait_for_timeout
+        cap = lambda t: pg.evaluate(CAP, t)
+        await pg.goto(URL); await w(1200)
+        await cap('Chat-to-Invoice: turn WhatsApp & Telegram orders into PayPal invoices'); await w(3500)
+        await pg.screenshot(path='docs/screenshot-landing-dark.png')
+        await cap('Light / dark theme: follows the system default and remembers your choice'); await w(1500)
+        await pg.click('[data-test=theme]'); await w(2500)
+        await pg.screenshot(path='docs/screenshot-landing-light.png')
+        await pg.click('[data-test=theme]'); await w(1500)
+        async def pick(code, typed):
+            await pg.click('[data-test=ui-lang]'); await w(700)
+            await pg.locator('[data-test=lang-search]').type(typed, delay=120); await w(600)
+            await pg.click(f'[data-lang={code}]'); await w(400)
+        await cap('Native UI in 12 languages, with a searchable language switcher'); await w(800)
+        await pg.click('[data-test=ui-lang]'); await w(2500); await pg.click('[data-test=ui-lang]'); await w(300)
+        await pick('tr', 'Tur'); await cap('Türkçe (Turkish)'); await w(2500)
+        await pick('ar', 'Arab'); await cap('العربية (Arabic, right-to-left)'); await w(2200)
+        await pick('ha', 'Hau'); await cap('Hausa: let’s continue in Hausa'); await w(3000)
+        await pg.click('[data-test=open-app]'); await cap('The seller dashboard (in Hausa)'); await w(2500)
+        await cap('Paste an order chat written in Hausa (fictional seller & buyer)'); await w(1000)
+        await pg.click('[data-test=sample]'); await w(3000)
+        await cap('Google Gemini (gemini-2.5-flash) extracts items, prices, currency, buyer name & email as structured JSON'); await w(1200)
+        await pg.click('[data-test=extract]'); await pg.wait_for_selector('[data-test=preview]', timeout=30000); await w(4000)
+        await cap('Everything is editable: change the dress quantity from 2 to 3'); await w(1500)
+        q = pg.locator('[data-test=qty-0]'); await q.click(); await q.press('Control+a'); await q.type('3', delay=200); await w(2500)
+        await pg.screenshot(path='docs/screenshot-preview.png')
+        await cap('Create & send through PayPal Invoicing v2 in the real PayPal Sandbox'); await w(2500)
+        await pg.click('[data-test=create]'); await pg.wait_for_selector('[data-test=status] >> text=/An aika/', timeout=30000)
+        await pg.evaluate("window.scrollTo({top: 640, behavior: 'smooth'})"); await w(1500)
+        await cap('Invoice created as Draft, then Sent to the buyer'); await w(3000)
+        await cap('Gemini drafts a native-language payment reminder'); await pg.wait_for_selector('[data-test=reminder] >> text=/paypal/i', timeout=30000); await w(3500)
+        for lang, text in [('tr', 'Reminder in Turkish'), ('ar', 'Reminder in Arabic (right-to-left)')]:
+            await pg.select_option('[data-test=lang]', lang); await cap(text); await w(1000)
+            await pg.wait_for_selector('[data-test=reminder] >> text=/paypal/i', timeout=30000); await w(3000)
+        await pg.click('[data-test=tone-firm]'); await cap('Switch tone: gentle or firm'); await w(1000)
+        await pg.wait_for_selector('[data-test=reminder] >> text=/paypal/i', timeout=30000); await w(3000)
+        await cap('Payment recorded via the PayPal API → status updates to paid'); await w(1200)
+        await pg.click('[data-test=simulate]'); await pg.wait_for_selector('[data-test=status] >> text=/biya/', timeout=30000); await w(3000)
+        await pg.screenshot(path='docs/screenshot-status.png')
+        await pg.click('[data-test=theme]'); await cap('Same dashboard in light theme'); await w(3500)
+        await pg.screenshot(path='docs/screenshot-dashboard-light.png')
+        await cap('Chat-to-Invoice · built for the PayPal AI Hackathon · MIT licensed'); await w(3500)
+        await ctx.close(); await b.close()
+asyncio.run(main())
