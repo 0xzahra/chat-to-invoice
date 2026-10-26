@@ -2,11 +2,18 @@
 const BASE = process.env.PAYPAL_API_BASE || 'https://api-m.sandbox.paypal.com';
 export const LIVE = Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET);
 let token = null; let tokenExp = 0;
+// Falls back to labelled demo mode when sandbox credentials are missing or rejected.
+let authFailed = false;
+const live = () => LIVE && !authFailed;
+export async function mode() {
+  if (live()) { try { await auth(); } catch { /* auth() marks the failure */ } }
+  return live() ? 'sandbox' : 'demo';
+}
 async function auth() {
   if (token && Date.now() < tokenExp) return token;
   const basic = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64');
   const r = await fetch(`${BASE}/v1/oauth2/token`, { method: 'POST', headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=client_credentials' });
-  if (!r.ok) throw new Error(`PayPal auth failed (${r.status})`);
+  if (!r.ok) { if (r.status === 401 || r.status === 403) { authFailed = true; console.warn('PayPal auth rejected; switching to demo mode'); } throw new Error(`PayPal auth failed (${r.status})`); }
   const j = await r.json(); token = j.access_token; tokenExp = Date.now() + (j.expires_in - 60) * 1000; return token;
 }
 async function pp(path, opts = {}) {
@@ -40,26 +47,27 @@ function mockCreate(payload) {
 
 export async function createInvoice(d) {
   const payload = buildPayload(d);
-  if (!LIVE) return slim(mockCreate(payload));
+  if (live()) { try { await auth(); } catch { /* falls through to demo */ } }
+  if (!live()) return slim(mockCreate(payload));
   const inv = await pp('/v2/invoicing/invoices', { method: 'POST', body: JSON.stringify(payload) });
   return slim(inv.id ? inv : await pp(new URL(inv.href).pathname));
 }
 export async function sendInvoice(id) {
-  if (!LIVE) { const i = store.get(id); i.status = 'SENT'; return slim(i); }
+  if (!live() || store.has(id)) { const i = store.get(id); i.status = 'SENT'; return slim(i); }
   await pp(`/v2/invoicing/invoices/${id}/send`, { method: 'POST', body: JSON.stringify({ send_to_invoicer: true }) });
   return getInvoice(id);
 }
 export async function getInvoice(id) {
-  if (!LIVE) return slim(store.get(id));
+  if (!live() || store.has(id)) return slim(store.get(id));
   return slim(await pp(`/v2/invoicing/invoices/${id}`));
 }
 export async function remindInvoice(id) {
-  if (!LIVE) return getInvoice(id);
+  if (!live() || store.has(id)) return getInvoice(id);
   await pp(`/v2/invoicing/invoices/${id}/remind`, { method: 'POST', body: JSON.stringify({ send_to_invoicer: true }) });
   return getInvoice(id);
 }
 export async function simulatePaid(id) {
-  if (LIVE) { // Records an external payment via PayPal's record-payment endpoint (real sandbox call).
+  if (live() && !store.has(id)) { // Records an external payment via PayPal's record-payment endpoint (real sandbox call).
     const inv = await getInvoice(id);
     await pp(`/v2/invoicing/invoices/${id}/payments`, { method: 'POST', body: JSON.stringify({ method: 'OTHER', payment_date: new Date().toISOString().slice(0, 10), amount: { currency_code: inv.total.currency_code, value: inv.total.value }, note: 'Recorded from Chat-to-Invoice' }) });
     return getInvoice(id);
